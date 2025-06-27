@@ -3,174 +3,11 @@ import gradio as gr
 import requests
 import inspect
 import pandas as pd
-import sys
-import time
-from dotenv import load_dotenv
-from smolagents import DuckDuckGoSearchTool, OpenAIServerModel, CodeAgent, Tool
-from blablador import Models
+from agent import BasicAgent
 
 # (Keep Constants as is)
 # --- Constants ---
 DEFAULT_API_URL = "https://agents-course-unit4-scoring.hf.space"
-
-# --- Basic Agent Definition ---
-# ----- THIS IS WERE YOU CAN BUILD WHAT YOU WANT ------
-load_dotenv()
-
-
-class BasicAgent:
-
-    def __init__(self, model_provider: str = "Blablador"):
-        self.model_provider = model_provider
-
-        if model_provider == "Blablador":
-
-            models = Models(
-                api_key=os.getenv("Blablador_API_KEY")).get_model_ids()
-            model_id_blablador = 5
-            model_name = " ".join(
-                models[model_id_blablador].split(" - ")[1].split()[:2])
-            print("The agent uses the following model:", model_name)
-
-            answer_llm = OpenAIServerModel(
-                model_id=models[model_id_blablador],
-                api_base="https://helmholtz-blablador.fz-juelich.de:8000/v1",
-                api_key=os.getenv("Blablador_API_KEY"),
-                flatten_messages_as_text=True,
-                temperature=0.2)
-
-        elif model_provider == "Gemini":
-
-            # model_name = "gemini-2.5-flash-preview-05-20"
-            model_name = "gemini-2.0-flash"
-            print("The agent uses the following model:", model_name)
-
-            answer_llm = OpenAIServerModel(
-                model_id=model_name,
-                api_base=
-                "https://generativelanguage.googleapis.com/v1beta/openai/",
-                api_key=os.getenv("Gemini_API_KEY2"),
-                temperature=0.2)
-        else:
-            print(
-                f"Error: Unsupported model provider '{model_provider}'. Only 'Blablador' and 'Gemini' are supported."
-            )
-            sys.exit(1)
-
-        self.agent = CodeAgent(
-            tools=[DuckDuckGoSearchTool()],
-            model=answer_llm,
-            planning_interval=3,
-            max_steps=10,
-            # verbosity_level=LogLevel.ERROR,
-        )
-
-    def __call__(self,
-                 question: str,
-                 file_url: str = "",
-                 file_ext: str = "") -> str:
-        print(f"Agent received question (first 50 chars): {question[:50]}...")
-
-        SYSTEM_PROMPT = """You are a general AI assistant. I will ask you a question. 
-        Report your thoughts, and finish your answer with the following template: FINAL ANSWER: [YOUR FINAL ANSWER]. 
-        YOUR FINAL ANSWER should be a number OR as few words as possible OR a comma separated list of numbers and/or strings. 
-        If you are asked for a number, don't use comma to write your number 
-        neither use units such as $ or percent sign unless specified otherwise. 
-        If you are asked for a string, don't use articles, neither ABBREVIATIONS, (e.g. for cities), 
-        and write the digits in plain text unless specified otherwise. 
-        If you are asked for a comma separated list, 
-        apply the above rules depending of whether the element to be put in the list is a number or a string.
-        """
-
-        # Prepare additional_args for file handling
-        additional_args = {}
-
-        # Handle file if provided
-        if file_url:
-            # print(f"Downloading file from: {file_url}")
-            # file_content = self._download_file(file_url, file_ext)
-
-            # if file_content is not None:
-            #     # Give the file a clear name based on its extension
-            #     if file_ext.lower() == 'csv':
-            #         # For CSV files, try to load as DataFrame
-            #         try:
-            #             import io
-            #             if isinstance(file_content, str):
-            #                 df = pd.read_csv(io.StringIO(file_content))
-            #             else:
-            #                 df = pd.read_csv(io.BytesIO(file_content))
-            #             additional_args['dataframe'] = df
-            #             additional_args['csv_file'] = file_content
-            #             print(f"Loaded CSV file with shape: {df.shape}")
-            #         except Exception as e:
-            #             print(f"Could not parse CSV file: {e}")
-            #             additional_args['file_content'] = file_content
-
-            #     elif file_ext.lower() in ['json']:
-            #         try:
-            #             import json
-            #             if isinstance(file_content, bytes):
-            #                 file_content = file_content.decode('utf-8')
-            #             json_data = json.loads(file_content)
-            #             additional_args['json_data'] = json_data
-            #             additional_args['file_content'] = file_content
-            #             print(f"Loaded JSON file")
-            #         except Exception as e:
-            #             print(f"Could not parse JSON file: {e}")
-            #             additional_args['file_content'] = file_content
-
-            #     else:
-            #         # For other file types, just pass the content
-            #         additional_args['file_content'] = file_content
-            #         if file_ext:
-            #             additional_args['file_extension'] = file_ext
-            #         print(f"Loaded {file_ext} file")
-
-            # Update the prompt to mention the file
-            # full_prompt = f"{SYSTEM_PROMPT}\n\nQuestion: {question}\n\nNote: A {file_ext} file has been provided and is available for your analysis."
-            additional_args = f"{file_url}_{file_ext}"
-            full_prompt = f"{SYSTEM_PROMPT}\n\nQuestion: {question}\n\nNote: A {file_ext} file has been provided and is available for your analysis."
-
-            # else:
-            # full_prompt = f"{SYSTEM_PROMPT}\n\nQuestion: {question}\n\nNote: Could not retrieve the file from {file_url}."
-        else:
-            full_prompt = f"{SYSTEM_PROMPT}\n\nQuestion: {question}"
-
-        # # Combine system prompt with the user question
-        # full_prompt = f"{SYSTEM_PROMPT}\n\nQuestion: {question}"
-
-        try:
-            answer = self.agent.run(full_prompt)
-            # answer = self.agent.run(
-            #     task=full_prompt,
-            #     additional_args=additional_args if additional_args else None)
-            print(f"Agent returning answer: {answer}")
-            if self.model_provider == "Gemini":
-                time.sleep(10)
-            return answer
-        except Exception as e:
-            print(f"Error running agent: {e}")
-            return f"Error: {e}"
-
-    def _download_file(self, file_url: str, file_ext: str = "") -> str:
-        """Download file content from URL and return as text or bytes"""
-        try:
-            response = requests.get(file_url, timeout=30)
-            response.raise_for_status()
-
-            # For text files, return as string
-            if file_ext.lower() in [
-                    'txt', 'csv', 'json', 'md', 'py', 'js', 'html', 'xml'
-            ]:
-                return response.text
-            else:
-                # For binary files, return the content as bytes
-                return response.content
-
-        except Exception as e:
-            print(f"Error downloading file from {file_url}: {e}")
-            return None
 
 
 def run_and_submit_all(profile: gr.OAuthProfile | None):
@@ -244,7 +81,7 @@ def run_and_submit_all(profile: gr.OAuthProfile | None):
             file_url = f"{api_url}/files/{task_id}"
 
         try:
-            submitted_answer = agent(question_text)
+            submitted_answer = agent(question_text, task_id)
             # submitted_answer = agent(question_text, file_url, file_ext)
             answers_payload.append({
                 "task_id": task_id,

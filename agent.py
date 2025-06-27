@@ -1,0 +1,314 @@
+import json
+import os
+import requests
+import sys
+import time
+from datetime import datetime
+from dotenv import load_dotenv
+from typing import Dict, List, Any
+from smolagents import DuckDuckGoSearchTool, OpenAIServerModel, CodeAgent, ActionStep, TaskStep
+from blablador import Models
+
+load_dotenv()
+
+
+class BasicAgent:
+
+    def __init__(self,
+                 model_provider: str = "Blablador",
+                 memory_file: str = "agent_memory.json"):
+        self.model_provider = model_provider
+        self.memory_file = memory_file
+
+        if model_provider == "Blablador":
+
+            models = Models(
+                api_key=os.getenv("Blablador_API_KEY")).get_model_ids()
+            model_id_blablador = 5
+            model_name = " ".join(
+                models[model_id_blablador].split(" - ")[1].split()[:2])
+            print("The agent uses the following model:", model_name)
+
+            answer_llm = OpenAIServerModel(
+                model_id=models[model_id_blablador],
+                api_base="https://helmholtz-blablador.fz-juelich.de:8000/v1",
+                api_key=os.getenv("Blablador_API_KEY"),
+                flatten_messages_as_text=True,
+                temperature=0.2)
+
+        elif model_provider == "Gemini":
+
+            # model_name = "gemini-2.5-flash-preview-05-20"
+            model_name = "gemini-2.0-flash"
+            print("The agent uses the following model:", model_name)
+
+            answer_llm = OpenAIServerModel(
+                model_id=model_name,
+                api_base=
+                "https://generativelanguage.googleapis.com/v1beta/openai/",
+                api_key=os.getenv("Gemini_API_KEY2"),
+                temperature=0.2)
+        else:
+            print(
+                f"Error: Unsupported model provider '{model_provider}'. Only 'Blablador' and 'Gemini' are supported."
+            )
+            sys.exit(1)
+
+        self.agent = CodeAgent(
+            tools=[DuckDuckGoSearchTool()],
+            model=answer_llm,
+            planning_interval=3,
+            max_steps=10,
+            # verbosity_level=LogLevel.ERROR,
+        )
+
+    def __call__(self,
+                 question: str,
+                 task_id: str = "",
+                 file_url: str = "",
+                 file_ext: str = "") -> str:
+        print(f"Agent received question (first 50 chars): {question[:50]}...")
+
+        SYSTEM_PROMPT = """You are a general AI assistant. I will ask you a question. 
+        Report your thoughts, and finish your answer with the following template: FINAL ANSWER: [YOUR FINAL ANSWER]. 
+        YOUR FINAL ANSWER should be a number OR as few words as possible OR a comma separated list of numbers and/or strings. 
+        If you are asked for a number, don't use comma to write your number 
+        neither use units such as $ or percent sign unless specified otherwise. 
+        If you are asked for a string, don't use articles, neither abbreviations, (e.g. for cities), 
+        and write the digits in plain text unless specified otherwise. 
+        If you are asked for a comma separated list, 
+        apply the above rules depending of whether the element to be put in the list is a number or a string.
+        """
+
+        # Prepare additional_args for file handling
+        additional_args = {}
+
+        # Handle file if provided
+        if file_url:
+            # print(f"Downloading file from: {file_url}")
+            # file_content = self._download_file(file_url, file_ext)
+
+            # if file_content is not None:
+            #     # Give the file a clear name based on its extension
+            #     if file_ext.lower() == 'csv':
+            #         # For CSV files, try to load as DataFrame
+            #         try:
+            #             import io
+            #             if isinstance(file_content, str):
+            #                 df = pd.read_csv(io.StringIO(file_content))
+            #             else:
+            #                 df = pd.read_csv(io.BytesIO(file_content))
+            #             additional_args['dataframe'] = df
+            #             additional_args['csv_file'] = file_content
+            #             print(f"Loaded CSV file with shape: {df.shape}")
+            #         except Exception as e:
+            #             print(f"Could not parse CSV file: {e}")
+            #             additional_args['file_content'] = file_content
+
+            #     elif file_ext.lower() in ['json']:
+            #         try:
+            #             import json
+            #             if isinstance(file_content, bytes):
+            #                 file_content = file_content.decode('utf-8')
+            #             json_data = json.loads(file_content)
+            #             additional_args['json_data'] = json_data
+            #             additional_args['file_content'] = file_content
+            #             print(f"Loaded JSON file")
+            #         except Exception as e:
+            #             print(f"Could not parse JSON file: {e}")
+            #             additional_args['file_content'] = file_content
+
+            #     else:
+            #         # For other file types, just pass the content
+            #         additional_args['file_content'] = file_content
+            #         if file_ext:
+            #             additional_args['file_extension'] = file_ext
+            #         print(f"Loaded {file_ext} file")
+
+            # Update the prompt to mention the file
+            # full_prompt = f"{SYSTEM_PROMPT}\n\nQuestion: {question}\n\nNote: A {file_ext} file has been provided and is available for your analysis."
+            additional_args = f"{file_url}_{file_ext}"
+            full_prompt = f"{SYSTEM_PROMPT}\n\nQuestion: {question}\n\nNote: A {file_ext} file has been provided and is available for your analysis."
+
+            # else:
+            # full_prompt = f"{SYSTEM_PROMPT}\n\nQuestion: {question}\n\nNote: Could not retrieve the file from {file_url}."
+        else:
+            full_prompt = f"{SYSTEM_PROMPT}\n\nQuestion: {question}"
+
+        # # Combine system prompt with the user question
+        # full_prompt = f"{SYSTEM_PROMPT}\n\nQuestion: {question}"
+
+        try:
+            answer = self.agent.run(full_prompt)
+            # answer = self.agent.run(
+            #     task=full_prompt,
+            #     additional_args=additional_args if additional_args else None)
+            print(f"Agent returning answer: {answer}")
+
+            # Export memory after execution
+            self.export_memory_to_json(task_id=task_id,
+                                       question=question,
+                                       answer=answer)
+
+            # Sleep for 10 seconds if using Gemini to avoid rate limiting
+            if self.model_provider == "Gemini":
+                time.sleep(10)
+            return answer
+        except Exception as e:
+            print(f"Error running agent: {e}")
+            return f"Error: {e}"
+
+    def export_memory_to_json(self,
+                              task_id: str = "",
+                              question: str = "",
+                              answer: str = "",
+                              error: str = ""):
+        """Export agent's memory to JSON file for each question"""
+        memory_data = self.extract_memory_data()
+
+        # Load existing memory file if it exists
+        if os.path.exists(self.memory_file):
+            with open(self.memory_file, 'r', encoding='utf-8') as f:
+                existing_data = json.load(f)
+        else:
+            existing_data = {"questions": [], "batch_info": {}}
+
+        # Create question data
+        question_data = {
+            "question_id": task_id or len(existing_data["questions"]) + 1,
+            "timestamp": datetime.now().isoformat(),
+            "model_provider": self.model_provider,
+            "task": question,
+            "result": answer,
+            "error": error,
+            "memory": memory_data,
+            "memory_stats": self.get_memory_stats()
+        }
+
+        # Add or update question
+        if task_id:
+            # Check if question_id already exists and update it
+            question_exists = False
+            for i, existing_question in enumerate(existing_data["questions"]):
+                if existing_question["question_id"] == task_id:
+                    existing_data["questions"][i] = question_data
+                    question_exists = True
+                    break
+
+            if not question_exists:
+                existing_data["questions"].append(question_data)
+        else:
+            existing_data["questions"].append(question_data)
+
+        # Update batch info
+        existing_data["batch_info"] = {
+            "total_questions": len(existing_data["questions"]),
+            "last_updated": datetime.now().isoformat(),
+            "model_provider": self.model_provider
+        }
+
+        # Save to file
+        with open(self.memory_file, 'w', encoding='utf-8') as f:
+            json.dump(existing_data,
+                      f,
+                      indent=2,
+                      ensure_ascii=False,
+                      default=str)
+
+        print(f"Memory for question {task_id} exported to {self.memory_file}")
+
+    def extract_memory_data(self) -> Dict[str, Any]:
+        """Extract memory data from agent"""
+        memory_data = {"system_prompt": None, "steps": [], "full_steps": []}
+
+        # Get system prompt
+        if hasattr(self.agent.memory,
+                   'system_prompt') and self.agent.memory.system_prompt:
+            memory_data["system_prompt"] = {
+                "content": str(self.agent.memory.system_prompt.system_prompt),
+                "type": "system_prompt"
+            }
+
+        # Get all memory steps
+        for i, step in enumerate(self.agent.memory.steps):
+            step_data = {
+                "step_index": i,
+                "step_type": type(step).__name__,
+                "timestamp": datetime.now().isoformat()
+            }
+
+            if isinstance(step, TaskStep):
+                step_data.update({
+                    "task":
+                    step.task,
+                    "task_images":
+                    len(step.task_images) if step.task_images else 0
+                })
+
+            elif isinstance(step, ActionStep):
+                step_data.update({
+                    "step_number":
+                    step.step_number,
+                    "llm_output":
+                    getattr(step, 'action', None),
+                    "observations":
+                    step.observations,
+                    "error":
+                    str(step.error) if step.error else None,
+                    "has_images":
+                    len(step.observations_images) > 0
+                    if step.observations_images else False
+                })
+
+            memory_data["steps"].append(step_data)
+
+        # Get full steps as dictionaries (as mentioned in docs)
+        try:
+            full_steps = self.agent.memory.get_full_steps()
+            memory_data["full_steps"] = full_steps
+        except Exception as e:
+            print(f"Could not get full steps: {e}")
+            memory_data["full_steps"] = []
+
+        return memory_data
+
+    def get_memory_stats(self) -> Dict[str, int]:
+        """Get statistics about the agent's memory"""
+        stats = {
+            "total_steps": len(self.agent.memory.steps),
+            "task_steps": 0,
+            "action_steps": 0,
+            "error_steps": 0,
+            "successful_steps": 0
+        }
+
+        for step in self.agent.memory.steps:
+            if isinstance(step, TaskStep):
+                stats["task_steps"] += 1
+            elif isinstance(step, ActionStep):
+                stats["action_steps"] += 1
+                if step.error:
+                    stats["error_steps"] += 1
+                else:
+                    stats["successful_steps"] += 1
+
+        return stats
+
+    def _download_file(self, file_url: str, file_ext: str = "") -> str:
+        """Download file content from URL and return as text or bytes"""
+        try:
+            response = requests.get(file_url, timeout=30)
+            response.raise_for_status()
+
+            # For text files, return as string
+            if file_ext.lower() in [
+                    'txt', 'csv', 'json', 'md', 'py', 'js', 'html', 'xml'
+            ]:
+                return response.text
+            else:
+                # For binary files, return the content as bytes
+                return response.content
+
+        except Exception as e:
+            print(f"Error downloading file from {file_url}: {e}")
+            return None
