@@ -7,7 +7,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from typing import Dict, List, Any
 from smolagents import DuckDuckGoSearchTool, OpenAIServerModel, CodeAgent, ActionStep, TaskStep
-from blablador import Models
+from utils.blablador_helper import BlabladorChatModel
 
 load_dotenv()
 
@@ -22,18 +22,20 @@ class BasicAgent:
 
         if model_provider == "Blablador":
 
-            models = Models(
-                api_key=os.getenv("Blablador_API_KEY")).get_model_ids()
-            model_id_blablador = 5
-            model_name = " ".join(
-                models[model_id_blablador].split(" - ")[1].split()[:2])
-            print("The agent uses the following model:", model_name)
+            # Initialize LLM via Blablador
+            API_KEY = os.getenv("Blablador_API_KEY")
+            LLM_helper = BlabladorChatModel(api_key=API_KEY)
+            model_name = " Qwen3.5-122B"  # Options: Qwen3.5-122B, MiniMax-M2.7
+            model_fullname = LLM_helper.get_model_fullname(model_name)
+            print(
+                f"The agentic RAG uses the following model: {model_fullname}\n"
+            )
 
             answer_llm = OpenAIServerModel(
-                model_id=models[model_id_blablador],
-                api_base="https://helmholtz-blablador.fz-juelich.de:8000/v1",
-                api_key=os.getenv("Blablador_API_KEY"),
-                flatten_messages_as_text=True,
+                model_id=model_fullname,
+                api_base="https://api.helmholtz-blablador.fz-juelich.de/v1",
+                api_key=API_KEY,
+                max_tokens=16384,
                 temperature=0.2)
 
         elif model_provider == "Gemini":

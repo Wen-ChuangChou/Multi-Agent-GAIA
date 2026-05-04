@@ -1,3 +1,5 @@
-gradio
+ddgs
+gradio[oauth]
+openai
 requests
 smolagents
