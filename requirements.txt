@@ -1,3 +1,4 @@
+datasets
 ddgs
 gradio[oauth]
 langfuse

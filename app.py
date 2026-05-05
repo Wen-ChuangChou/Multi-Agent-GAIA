@@ -6,6 +6,7 @@ import inspect
 import pandas as pd
 from dotenv import load_dotenv
 from agent import BasicAgent
+from utils.gaia_files import GAIAFileResolver
 
 # Load environment variables BEFORE initializing the instrumentor
 load_dotenv()
@@ -67,6 +68,14 @@ def run_and_submit_all(profile: gr.OAuthProfile | None,
     agent_code = f"https://huggingface.co/spaces/{space_id}/tree/main"
     print(agent_code)
 
+    # Initialize GAIA file resolver (bypasses broken /files/{task_id})
+    try:
+        gaia_resolver = GAIAFileResolver()
+    except Exception as e:
+        print(f"Warning: Could not initialize GAIA file resolver: {e}")
+        print("File-bearing tasks will fall back to the API endpoint.")
+        gaia_resolver = None
+
     # 2. Fetch Questions
     print(f"Fetching questions from: {questions_url}")
     try:
@@ -109,7 +118,15 @@ def run_and_submit_all(profile: gr.OAuthProfile | None,
 
         if file_name:
             file_ext = file_name.split('.')[-1].lower()
-            file_url = f"{api_url}/files/{task_id}"
+            # Prefer local GAIA file (bypasses broken /files/{task_id})
+            local_path = (gaia_resolver.get_file_path(task_id)
+                          if gaia_resolver else None)
+            if local_path:
+                file_url = local_path
+                print(f"Using local GAIA file: {local_path}")
+            else:
+                file_url = f"{api_url}/files/{task_id}"
+                print(f"Falling back to API: {file_url}")
 
         try:
             # submitted_answer = agent(question_text, task_id)

@@ -6,9 +6,8 @@ import time
 from datetime import datetime
 from dotenv import load_dotenv
 from typing import Dict, List, Any
-from smolagents import (DuckDuckGoSearchTool,
-                        OpenAIServerModel, CodeAgent, ToolCallingAgent,
-                        ActionStep, TaskStep, LogLevel)
+from smolagents import (DuckDuckGoSearchTool, OpenAIServerModel, CodeAgent,
+                        ToolCallingAgent, ActionStep, TaskStep, LogLevel)
 from utils.blablador_helper import BlabladorChatModel
 from utils.agent_tools import visit_webpage
 
@@ -68,14 +67,13 @@ class BasicAgent:
             sys.exit(1)
 
         self.search_agent = ToolCallingAgent(
-            tools=[DuckDuckGoSearchTool(),
-                   visit_webpage],
+            tools=[DuckDuckGoSearchTool(), visit_webpage],
             model=answer_llm,
             max_steps=5,
             name="search_agent",
             description=
             "An agent that can search the web and read web pages. Give it a clear search query or URL, and it will return the information you need. IMPORTANT: Do NOT attempt to read or visit Wikipedia URLs (https://en.wikipedia.org/wiki) as they block requests and return 403 Forbidden errors. Always prefer alternative sources.",
-            verbosity_level=LogLevel.INFO,
+            verbosity_level=LogLevel.ERROR,
         )
         self.manager_agent = CodeAgent(
             tools=[],
@@ -84,7 +82,7 @@ class BasicAgent:
             max_steps=5,
             additional_authorized_imports=["time", "numpy", "pandas"],
             managed_agents=[self.search_agent],
-            verbosity_level=LogLevel.INFO,
+            verbosity_level=LogLevel.ERROR,
             max_print_outputs_length=2000,
         )
 
@@ -153,7 +151,7 @@ class BasicAgent:
 
             # Update the prompt to mention the file
             # full_prompt = f"{SYSTEM_PROMPT}\n\nQuestion: {question}\n\nNote: A {file_ext} file has been provided and is available for your analysis."
-            additional_args = f"{file_url}_{file_ext}"
+            # additional_args = f"{file_url}_{file_ext}"
             full_prompt = f"{SYSTEM_PROMPT}\n\nQuestion: {question}\n\nNote: A {file_ext} file has been provided and is available for your analysis."
 
         else:
@@ -324,8 +322,26 @@ class BasicAgent:
         return stats
 
     def _download_file(self, file_url: str, file_ext: str = "") -> str:
-        """Download file content from URL and return as text or bytes"""
+        """Download file content from URL or read from local path.
+
+        Supports both HTTP URLs and local file paths (for GAIA dataset
+        fallback when the /files/{task_id} endpoint is broken).
+        """
         try:
+            # Handle local file paths (from GAIA dataset)
+            if os.path.isfile(file_url):
+                print(f"Reading local file: {file_url}")
+                text_exts = [
+                    'txt', 'csv', 'json', 'md', 'py', 'js', 'html', 'xml'
+                ]
+                if file_ext.lower() in text_exts:
+                    with open(file_url, 'r', encoding='utf-8') as f:
+                        return f.read()
+                else:
+                    with open(file_url, 'rb') as f:
+                        return f.read()
+
+            # Handle HTTP URLs
             response = requests.get(file_url, timeout=30)
             response.raise_for_status()
 
@@ -339,5 +355,5 @@ class BasicAgent:
                 return response.content
 
         except Exception as e:
-            print(f"Error downloading file from {file_url}: {e}")
+            print(f"Error loading file from {file_url}: {e}")
             return None
