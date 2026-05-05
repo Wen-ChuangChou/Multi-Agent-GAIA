@@ -6,19 +6,30 @@ import time
 from datetime import datetime
 from dotenv import load_dotenv
 from typing import Dict, List, Any
-from smolagents import DuckDuckGoSearchTool, OpenAIServerModel, CodeAgent, ActionStep, TaskStep
+from smolagents import (DuckDuckGoSearchTool,
+                        OpenAIServerModel, CodeAgent, ToolCallingAgent,
+                        ActionStep, TaskStep, LogLevel)
 from utils.blablador_helper import BlabladorChatModel
+from utils.agent_tools import visit_webpage
 
 load_dotenv()
+RESULT_DIR = "results"
 
 
 class BasicAgent:
 
     def __init__(self,
                  model_provider: str = "Blablador",
-                 memory_file: str = "agent_memory.json"):
+                 memory_file: str = None):
         self.model_provider = model_provider
-        self.memory_file = memory_file
+
+        if memory_file is None:
+            os.makedirs(RESULT_DIR, exist_ok=True)
+            timestamp = datetime.now().strftime("%m%d_%H%M")
+            self.memory_file = os.path.join(RESULT_DIR,
+                                            f"agent_memory_{timestamp}.json")
+        else:
+            self.memory_file = memory_file
 
         if model_provider == "Blablador":
 
@@ -56,12 +67,25 @@ class BasicAgent:
             )
             sys.exit(1)
 
-        self.agent = CodeAgent(
-            tools=[DuckDuckGoSearchTool()],
+        self.search_agent = ToolCallingAgent(
+            tools=[DuckDuckGoSearchTool(),
+                   visit_webpage],
+            model=answer_llm,
+            max_steps=5,
+            name="search_agent",
+            description=
+            "An agent that can search the web and read web pages. Give it a clear search query or URL, and it will return the information you need. IMPORTANT: Do NOT attempt to read or visit Wikipedia URLs (https://en.wikipedia.org/wiki) as they block requests and return 403 Forbidden errors. Always prefer alternative sources.",
+            verbosity_level=LogLevel.INFO,
+        )
+        self.manager_agent = CodeAgent(
+            tools=[],
             model=answer_llm,
             planning_interval=3,
-            max_steps=10,
-            # verbosity_level=LogLevel.ERROR,
+            max_steps=5,
+            additional_authorized_imports=["time", "numpy", "pandas"],
+            managed_agents=[self.search_agent],
+            verbosity_level=LogLevel.INFO,
+            max_print_outputs_length=2000,
         )
 
     def __call__(self,
@@ -87,64 +111,64 @@ class BasicAgent:
 
         # Handle file if provided
         if file_url:
-            # print(f"Downloading file from: {file_url}")
-            # file_content = self._download_file(file_url, file_ext)
+            print(f"Downloading file from: {file_url}")
+            file_content = self._download_file(file_url, file_ext)
 
-            # if file_content is not None:
-            #     # Give the file a clear name based on its extension
-            #     if file_ext.lower() == 'csv':
-            #         # For CSV files, try to load as DataFrame
-            #         try:
-            #             import io
-            #             if isinstance(file_content, str):
-            #                 df = pd.read_csv(io.StringIO(file_content))
-            #             else:
-            #                 df = pd.read_csv(io.BytesIO(file_content))
-            #             additional_args['dataframe'] = df
-            #             additional_args['csv_file'] = file_content
-            #             print(f"Loaded CSV file with shape: {df.shape}")
-            #         except Exception as e:
-            #             print(f"Could not parse CSV file: {e}")
-            #             additional_args['file_content'] = file_content
+            if file_content is not None:
+                # Give the file a clear name based on its extension
+                if file_ext.lower() == 'csv':
+                    # For CSV files, try to load as DataFrame
+                    try:
+                        import io
+                        if isinstance(file_content, str):
+                            df = pd.read_csv(io.StringIO(file_content))
+                        else:
+                            df = pd.read_csv(io.BytesIO(file_content))
+                        additional_args['dataframe'] = df
+                        additional_args['csv_file'] = file_content
+                        print(f"Loaded CSV file with shape: {df.shape}")
+                    except Exception as e:
+                        print(f"Could not parse CSV file: {e}")
+                        additional_args['file_content'] = file_content
 
-            #     elif file_ext.lower() in ['json']:
-            #         try:
-            #             import json
-            #             if isinstance(file_content, bytes):
-            #                 file_content = file_content.decode('utf-8')
-            #             json_data = json.loads(file_content)
-            #             additional_args['json_data'] = json_data
-            #             additional_args['file_content'] = file_content
-            #             print(f"Loaded JSON file")
-            #         except Exception as e:
-            #             print(f"Could not parse JSON file: {e}")
-            #             additional_args['file_content'] = file_content
+                elif file_ext.lower() in ['json']:
+                    try:
+                        import json
+                        if isinstance(file_content, bytes):
+                            file_content = file_content.decode('utf-8')
+                        json_data = json.loads(file_content)
+                        additional_args['json_data'] = json_data
+                        additional_args['file_content'] = file_content
+                        print(f"Loaded JSON file")
+                    except Exception as e:
+                        print(f"Could not parse JSON file: {e}")
+                        additional_args['file_content'] = file_content
 
-            #     else:
-            #         # For other file types, just pass the content
-            #         additional_args['file_content'] = file_content
-            #         if file_ext:
-            #             additional_args['file_extension'] = file_ext
-            #         print(f"Loaded {file_ext} file")
+                else:
+                    # For other file types, just pass the content
+                    additional_args['file_content'] = file_content
+                    if file_ext:
+                        additional_args['file_extension'] = file_ext
+                    print(f"Loaded {file_ext} file")
 
             # Update the prompt to mention the file
             # full_prompt = f"{SYSTEM_PROMPT}\n\nQuestion: {question}\n\nNote: A {file_ext} file has been provided and is available for your analysis."
             additional_args = f"{file_url}_{file_ext}"
             full_prompt = f"{SYSTEM_PROMPT}\n\nQuestion: {question}\n\nNote: A {file_ext} file has been provided and is available for your analysis."
 
-            # else:
-            # full_prompt = f"{SYSTEM_PROMPT}\n\nQuestion: {question}\n\nNote: Could not retrieve the file from {file_url}."
         else:
-            full_prompt = f"{SYSTEM_PROMPT}\n\nQuestion: {question}"
+            full_prompt = f"{SYSTEM_PROMPT}\n\nQuestion: {question}\n\nNote: Could not retrieve the file from {file_url}."
+        # else:
+        #     full_prompt = f"{SYSTEM_PROMPT}\n\nQuestion: {question}"
 
         # # Combine system prompt with the user question
         # full_prompt = f"{SYSTEM_PROMPT}\n\nQuestion: {question}"
 
         try:
-            answer = self.agent.run(full_prompt)
-            # answer = self.agent.run(
-            #     task=full_prompt,
-            #     additional_args=additional_args if additional_args else None)
+            # answer = self.manager_agent.run(full_prompt)
+            answer = self.manager_agent.run(
+                task=full_prompt,
+                additional_args=additional_args if additional_args else None)
             print(f"Agent returning answer: {answer}")
 
             # Export memory after execution
@@ -224,15 +248,18 @@ class BasicAgent:
         memory_data = {"system_prompt": None, "steps": [], "full_steps": []}
 
         # Get system prompt
-        if hasattr(self.agent.memory,
-                   'system_prompt') and self.agent.memory.system_prompt:
+        if hasattr(
+                self.manager_agent.memory,
+                'system_prompt') and self.manager_agent.memory.system_prompt:
             memory_data["system_prompt"] = {
-                "content": str(self.agent.memory.system_prompt.system_prompt),
-                "type": "system_prompt"
+                "content":
+                str(self.manager_agent.memory.system_prompt.system_prompt),
+                "type":
+                "system_prompt"
             }
 
         # Get all memory steps
-        for i, step in enumerate(self.agent.memory.steps):
+        for i, step in enumerate(self.manager_agent.memory.steps):
             step_data = {
                 "step_index": i,
                 "step_type": type(step).__name__,
@@ -266,7 +293,7 @@ class BasicAgent:
 
         # Get full steps as dictionaries (as mentioned in docs)
         try:
-            full_steps = self.agent.memory.get_full_steps()
+            full_steps = self.manager_agent.memory.get_full_steps()
             memory_data["full_steps"] = full_steps
         except Exception as e:
             print(f"Could not get full steps: {e}")
@@ -277,14 +304,14 @@ class BasicAgent:
     def get_memory_stats(self) -> Dict[str, int]:
         """Get statistics about the agent's memory"""
         stats = {
-            "total_steps": len(self.agent.memory.steps),
+            "total_steps": len(self.manager_agent.memory.steps),
             "task_steps": 0,
             "action_steps": 0,
             "error_steps": 0,
             "successful_steps": 0
         }
 
-        for step in self.agent.memory.steps:
+        for step in self.manager_agent.memory.steps:
             if isinstance(step, TaskStep):
                 stats["task_steps"] += 1
             elif isinstance(step, ActionStep):

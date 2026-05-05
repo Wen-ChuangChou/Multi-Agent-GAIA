@@ -1,5 +1,8 @@
 ddgs
 gradio[oauth]
+langfuse
+markdownify
+openinference-instrumentation-smolagents
 openai
 requests
-smolagents
+smolagents[telemetry]

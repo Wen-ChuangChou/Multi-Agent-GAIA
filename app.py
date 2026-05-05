@@ -1,16 +1,43 @@
 import os
+import base64
 import gradio as gr
 import requests
 import inspect
 import pandas as pd
+from dotenv import load_dotenv
 from agent import BasicAgent
 
-# (Keep Constants as is)
+# Load environment variables BEFORE initializing the instrumentor
+load_dotenv()
+
 # --- Constants ---
 DEFAULT_API_URL = "https://agents-course-unit4-scoring.hf.space"
 
+# --- Langfuse tracing via OpenTelemetry ---
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from openinference.instrumentation.smolagents import SmolagentsInstrumentor
 
-def run_and_submit_all(profile: gr.OAuthProfile | None):
+LANGFUSE_PUBLIC_KEY = os.environ.get("LANGFUSE_PUBLIC_KEY", "")
+LANGFUSE_SECRET_KEY = os.environ.get("LANGFUSE_SECRET_KEY", "")
+LANGFUSE_HOST = os.environ.get("LANGFUSE_HOST", "https://cloud.langfuse.com")
+LANGFUSE_AUTH = base64.b64encode(
+    f"{LANGFUSE_PUBLIC_KEY}:{LANGFUSE_SECRET_KEY}".encode()).decode()
+
+exporter = OTLPSpanExporter(
+    endpoint=f"{LANGFUSE_HOST}/api/public/otel/v1/traces",
+    headers={"Authorization": f"Basic {LANGFUSE_AUTH}"},
+)
+
+trace_provider = TracerProvider()
+trace_provider.add_span_processor(SimpleSpanProcessor(exporter))
+
+SmolagentsInstrumentor().instrument(tracer_provider=trace_provider)
+
+
+def run_and_submit_all(profile: gr.OAuthProfile | None,
+                       test_mode: bool = False):
     """
     Fetches all questions, runs the BasicAgent on them, submits all answers,
     and displays the results.
@@ -50,6 +77,10 @@ def run_and_submit_all(profile: gr.OAuthProfile | None):
             print("Fetched questions list is empty.")
             return "Fetched questions list is empty or invalid format.", None
         print(f"Fetched {len(questions_data)} questions.")
+
+        if test_mode:
+            questions_data = questions_data[:5]
+            print("Test mode enabled: running only the first 5 questions.")
     except requests.exceptions.RequestException as e:
         print(f"Error fetching questions: {e}")
         return f"Error fetching questions: {e}", None
@@ -81,8 +112,8 @@ def run_and_submit_all(profile: gr.OAuthProfile | None):
             file_url = f"{api_url}/files/{task_id}"
 
         try:
-            submitted_answer = agent(question_text, task_id)
-            # submitted_answer = agent(question_text, file_url, file_ext)
+            # submitted_answer = agent(question_text, task_id)
+            submitted_answer = agent(question_text, file_url, file_ext)
             answers_payload.append({
                 "task_id": task_id,
                 "submitted_answer": submitted_answer
@@ -175,6 +206,8 @@ with gr.Blocks() as demo:
 
     gr.LoginButton()
 
+    test_mode_checkbox = gr.Checkbox(
+        label="Test Mode (Run only first 5 questions)", value=False)
     run_button = gr.Button("Run Evaluation & Submit All Answers")
 
     status_output = gr.Textbox(label="Run Status / Submission Result",
@@ -185,6 +218,7 @@ with gr.Blocks() as demo:
                                  wrap=True)
 
     run_button.click(fn=run_and_submit_all,
+                     inputs=[test_mode_checkbox],
                      outputs=[status_output, results_table])
 
 if __name__ == "__main__":
