@@ -3,6 +3,7 @@ import os
 import requests
 import sys
 import time
+import yaml
 from datetime import datetime
 from dotenv import load_dotenv
 from typing import Dict, List, Any
@@ -45,6 +46,7 @@ class BasicAgent:
                 model_id=model_fullname,
                 api_base="https://api.helmholtz-blablador.fz-juelich.de/v1",
                 api_key=API_KEY,
+                timeout=300,
                 max_tokens=16384,
                 temperature=0.2)
 
@@ -73,7 +75,7 @@ class BasicAgent:
             name="search_agent",
             description=
             "An agent that can search the web and read web pages. Give it a clear search query or URL, and it will return the information you need. IMPORTANT: Do NOT attempt to read or visit Wikipedia URLs (https://en.wikipedia.org/wiki) as they block requests and return 403 Forbidden errors. Always prefer alternative sources.",
-            verbosity_level=LogLevel.ERROR,
+            verbosity_level=LogLevel.INFO,
         )
         self.manager_agent = CodeAgent(
             tools=[],
@@ -82,7 +84,7 @@ class BasicAgent:
             max_steps=5,
             additional_authorized_imports=["time", "numpy", "pandas"],
             managed_agents=[self.search_agent],
-            verbosity_level=LogLevel.ERROR,
+            verbosity_level=LogLevel.INFO,
             max_print_outputs_length=2000,
         )
 
@@ -93,16 +95,14 @@ class BasicAgent:
                  file_ext: str = "") -> str:
         print(f"Agent received question (first 50 chars): {question[:50]}...")
 
-        SYSTEM_PROMPT = """You are a general AI assistant. I will ask you a question. 
-        Report your thoughts, and finish your answer with the following template: FINAL ANSWER: [YOUR FINAL ANSWER]. 
-        YOUR FINAL ANSWER should be a number OR as few words as possible OR a comma separated list of numbers and/or strings. 
-        If you are asked for a number, don't use comma to write your number 
-        neither use units such as $ or percent sign unless specified otherwise. 
-        If you are asked for a string, don't use articles, neither abbreviations, (e.g. for cities), 
-        and write the digits in plain text unless specified otherwise. 
-        If you are asked for a comma separated list, 
-        apply the above rules depending of whether the element to be put in the list is a number or a string.
-        """
+        prompt_file_path = os.path.join(os.path.dirname(__file__), "prompt", "system_prompt.yaml")
+        try:
+            with open(prompt_file_path, "r", encoding="utf-8") as f:
+                prompt_data = yaml.safe_load(f)
+                SYSTEM_PROMPT = prompt_data.get("prompt", "")
+        except Exception as e:
+            print(f"Failed to load system prompt from yaml: {e}")
+            SYSTEM_PROMPT = ""
 
         # Prepare additional_args for file handling
         additional_args = {}

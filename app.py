@@ -38,7 +38,8 @@ SmolagentsInstrumentor().instrument(tracer_provider=trace_provider)
 
 
 def run_and_submit_all(profile: gr.OAuthProfile | None,
-                       test_mode: bool = False):
+                       test_mode: bool = False,
+                       specific_question_index: float | None = None):
     """
     Fetches all questions, runs the BasicAgent on them, submits all answers,
     and displays the results.
@@ -87,7 +88,14 @@ def run_and_submit_all(profile: gr.OAuthProfile | None,
             return "Fetched questions list is empty or invalid format.", None
         print(f"Fetched {len(questions_data)} questions.")
 
-        if test_mode:
+        if specific_question_index is not None and specific_question_index > 0:
+            index = int(specific_question_index) - 1
+            if 0 <= index < len(questions_data):
+                questions_data = [questions_data[index]]
+                print(f"Running only for specific question #{index + 1}.")
+            else:
+                return f"Question number {index + 1} is out of bounds (1-{len(questions_data)}).", None
+        elif test_mode:
             questions_data = questions_data[:5]
             print("Test mode enabled: running only the first 5 questions.")
     except requests.exceptions.RequestException as e:
@@ -225,6 +233,10 @@ with gr.Blocks() as demo:
 
     test_mode_checkbox = gr.Checkbox(
         label="Test Mode (Run only first 5 questions)", value=False)
+    specific_question_number = gr.Number(
+        label="Specific Question Number (Optional, 1-indexed)",
+        value=None,
+        precision=0)
     run_button = gr.Button("Run Evaluation & Submit All Answers")
 
     status_output = gr.Textbox(label="Run Status / Submission Result",
@@ -235,7 +247,7 @@ with gr.Blocks() as demo:
                                  wrap=True)
 
     run_button.click(fn=run_and_submit_all,
-                     inputs=[test_mode_checkbox],
+                     inputs=[test_mode_checkbox, specific_question_number],
                      outputs=[status_output, results_table])
 
 if __name__ == "__main__":
