@@ -1,5 +1,6 @@
 import json
 import os
+import pandas as pd
 import requests
 import sys
 import time
@@ -36,10 +37,15 @@ class BasicAgent:
             # Initialize LLM via Blablador
             API_KEY = os.getenv("Blablador_API_KEY")
             LLM_helper = BlabladorChatModel(api_key=API_KEY)
-            model_name = " Qwen3.5-122B"  # Options: Qwen3.5-122B, MiniMax-M2.7
+
+            model_name = "MiniMax-M2.7"  # Options: Qwen3.5-122B, MiniMax-M2.7
             model_fullname = LLM_helper.get_model_fullname(model_name)
+            print(f"The agent uses the following model: {model_fullname}\n")
+
+            vlm_model_name = "Qwen3.5-122B"  # Options: Qwen3.5-122B, MiniMax-M2.7
+            vlm_model_fullname = LLM_helper.get_model_fullname(vlm_model_name)
             print(
-                f"The agentic RAG uses the following model: {model_fullname}\n"
+                f"The image agent uses the following model: {vlm_model_fullname}\n"
             )
 
             answer_llm = OpenAIServerModel(
@@ -48,6 +54,14 @@ class BasicAgent:
                 api_key=API_KEY,
                 timeout=300,
                 max_tokens=16384,
+                temperature=0.2)
+
+            vlm_llm = OpenAIServerModel(
+                model_id=vlm_model_fullname,
+                api_base="https://api.helmholtz-blablador.fz-juelich.de/v1",
+                api_key=API_KEY,
+                timeout=300,
+                max_tokens=1024,
                 temperature=0.2)
 
         elif model_provider == "Gemini":
@@ -77,6 +91,7 @@ class BasicAgent:
             "An agent that can search the web and read web pages. Give it a clear search query or URL, and it will return the information you need. IMPORTANT: Do NOT attempt to read or visit Wikipedia URLs (https://en.wikipedia.org/wiki) as they block requests and return 403 Forbidden errors. Always prefer alternative sources.",
             verbosity_level=LogLevel.ERROR,
         )
+
         @tool
         def ask_image_agent(question: str, image_path: str) -> str:
             """
@@ -89,7 +104,10 @@ class BasicAgent:
             from PIL import Image
             try:
                 image = Image.open(image_path).convert('RGB')
-                vision_agent = CodeAgent(tools=[], model=answer_llm, add_base_tools=False, verbosity_level=LogLevel.INFO)
+                vision_agent = CodeAgent(tools=[],
+                                         model=vlm_llm,
+                                         add_base_tools=False,
+                                         verbosity_level=LogLevel.ERROR)
                 return str(vision_agent.run(question, images=[image]))
             except Exception as e:
                 return f"Error analyzing image: {e}"
@@ -103,7 +121,7 @@ class BasicAgent:
             max_steps=5,
             additional_authorized_imports=["time", "numpy", "pandas"],
             managed_agents=[self.search_agent],
-            verbosity_level=LogLevel.INFO,
+            verbosity_level=LogLevel.ERROR,
             max_print_outputs_length=2000,
         )
 
@@ -183,7 +201,9 @@ class BasicAgent:
                 else:
                     if isinstance(file_content, bytes):
                         additional_args['file_path'] = file_url
-                        print(f"Passed {file_ext} file path instead of binary content: {file_url}")
+                        print(
+                            f"Passed {file_ext} file path instead of binary content: {file_url}"
+                        )
                     else:
                         additional_args['file_content'] = file_content
                         print(f"Loaded {file_ext} file content")
@@ -212,6 +232,10 @@ class BasicAgent:
             # Force the output to only contain the content after FINAL ANSWER:
             if isinstance(answer, str) and "FINAL ANSWER:" in answer:
                 answer = answer.split("FINAL ANSWER:")[-1].strip()
+
+            # If the answer is a float, format it to 2 decimal places to ensure precision (common in GAIA)
+            if isinstance(answer, float):
+                answer = f"{answer:.2f}"
 
             print(f"Agent returning answer: {answer}")
 
