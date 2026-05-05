@@ -8,9 +8,9 @@ from datetime import datetime
 from dotenv import load_dotenv
 from typing import Dict, List, Any
 from smolagents import (DuckDuckGoSearchTool, OpenAIServerModel, CodeAgent,
-                        ToolCallingAgent, ActionStep, TaskStep, LogLevel)
+                        ToolCallingAgent, ActionStep, TaskStep, LogLevel, tool)
 from utils.blablador_helper import BlabladorChatModel
-from utils.agent_tools import visit_webpage
+from utils.agent_tools import visit_webpage, analyze_image
 
 load_dotenv()
 RESULT_DIR = "results"
@@ -75,10 +75,29 @@ class BasicAgent:
             name="search_agent",
             description=
             "An agent that can search the web and read web pages. Give it a clear search query or URL, and it will return the information you need. IMPORTANT: Do NOT attempt to read or visit Wikipedia URLs (https://en.wikipedia.org/wiki) as they block requests and return 403 Forbidden errors. Always prefer alternative sources.",
-            verbosity_level=LogLevel.INFO,
+            verbosity_level=LogLevel.ERROR,
         )
+        @tool
+        def ask_image_agent(question: str, image_path: str) -> str:
+            """
+            An agent that can analyze images. Give it an image path and a question.
+            
+            Args:
+                question: The question to ask about the image.
+                image_path: The absolute path to the image file.
+            """
+            from PIL import Image
+            try:
+                image = Image.open(image_path).convert('RGB')
+                vision_agent = CodeAgent(tools=[], model=answer_llm, add_base_tools=False, verbosity_level=LogLevel.INFO)
+                return str(vision_agent.run(question, images=[image]))
+            except Exception as e:
+                return f"Error analyzing image: {e}"
+
+        self.image_agent = ask_image_agent
+
         self.manager_agent = CodeAgent(
-            tools=[],
+            tools=[self.image_agent],
             model=answer_llm,
             planning_interval=3,
             max_steps=5,
@@ -95,7 +114,8 @@ class BasicAgent:
                  file_ext: str = "") -> str:
         print(f"Agent received question (first 50 chars): {question[:50]}...")
 
-        prompt_file_path = os.path.join(os.path.dirname(__file__), "prompt", "system_prompt.yaml")
+        prompt_file_path = os.path.join(os.path.dirname(__file__), "prompt",
+                                        "system_prompt.yaml")
         try:
             with open(prompt_file_path, "r", encoding="utf-8") as f:
                 prompt_data = yaml.safe_load(f)
@@ -142,17 +162,38 @@ class BasicAgent:
                         print(f"Could not parse JSON file: {e}")
                         additional_args['file_content'] = file_content
 
+                elif file_ext.lower() in ['xlsx', 'xls']:
+                    try:
+                        import io
+                        import pandas as pd
+                        if isinstance(file_content, bytes):
+                            df = pd.read_excel(io.BytesIO(file_content))
+                        else:
+                            df = pd.read_excel(io.StringIO(file_content))
+                        additional_args['dataframe'] = df
+                        additional_args['file_path'] = file_url
+                        print(f"Loaded Excel file with shape: {df.shape}")
+                    except Exception as e:
+                        print(f"Could not parse Excel file: {e}")
+                        additional_args['file_path'] = file_url
+
+                elif file_ext.lower() in ['png', 'jpg', 'jpeg', 'gif', 'webp']:
+                    additional_args['image_path'] = file_url
+                    print(f"Loaded {file_ext} file path: {file_url}")
                 else:
-                    # For other file types, just pass the content
-                    additional_args['file_content'] = file_content
+                    if isinstance(file_content, bytes):
+                        additional_args['file_path'] = file_url
+                        print(f"Passed {file_ext} file path instead of binary content: {file_url}")
+                    else:
+                        additional_args['file_content'] = file_content
+                        print(f"Loaded {file_ext} file content")
                     if file_ext:
                         additional_args['file_extension'] = file_ext
-                    print(f"Loaded {file_ext} file")
 
             # Update the prompt to mention the file
-            # full_prompt = f"{SYSTEM_PROMPT}\n\nQuestion: {question}\n\nNote: A {file_ext} file has been provided and is available for your analysis."
-            # additional_args = f"{file_url}_{file_ext}"
             full_prompt = f"{SYSTEM_PROMPT}\n\nQuestion: {question}\n\nNote: A {file_ext} file has been provided and is available for your analysis."
+            # if file_ext.lower() in ['png', 'jpg', 'jpeg', 'gif', 'webp']:
+            # full_prompt += f"\nIMPORTANT: You MUST use the image_agent to analyze the image. The image path is: {file_url}"
 
         else:
             full_prompt = f"{SYSTEM_PROMPT}\n\nQuestion: {question}\n\nNote: Could not retrieve the file from {file_url}."
@@ -167,6 +208,11 @@ class BasicAgent:
             answer = self.manager_agent.run(
                 task=full_prompt,
                 additional_args=additional_args if additional_args else None)
+
+            # Force the output to only contain the content after FINAL ANSWER:
+            if isinstance(answer, str) and "FINAL ANSWER:" in answer:
+                answer = answer.split("FINAL ANSWER:")[-1].strip()
+
             print(f"Agent returning answer: {answer}")
 
             # Export memory after execution

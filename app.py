@@ -138,7 +138,7 @@ def run_and_submit_all(profile: gr.OAuthProfile | None,
 
         try:
             # submitted_answer = agent(question_text, task_id)
-            submitted_answer = agent(question_text, file_url, file_ext)
+            submitted_answer = agent(question_text, task_id=task_id, file_url=file_url, file_ext=file_ext)
             answers_payload.append({
                 "task_id": task_id,
                 "submitted_answer": submitted_answer

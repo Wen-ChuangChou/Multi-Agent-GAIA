@@ -1,6 +1,9 @@
+import base64
+import os
 import re
 import requests
 from markdownify import markdownify
+from pathlib import Path
 from requests.exceptions import RequestException
 from smolagents import tool
 from urllib.parse import urlparse
@@ -48,6 +51,68 @@ def visit_webpage(url: str) -> str:
         return f"Error fetching the webpage: {str(e)}"
     except Exception as e:
         return f"An unexpected error occurred: {str(e)}"
+
+# ── Helper: encode a local image to base64 data-URL ──────────
+def encode_image(path: str) -> str:
+    suffix = Path(path).suffix.lower().lstrip(".")
+    mime = {
+        "jpg": "jpeg",
+        "jpeg": "jpeg",
+        "png": "png",
+        "gif": "gif"
+    }.get(suffix, "jpeg")
+    with open(path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode()
+    return f"data:image/{mime};base64,{b64}"
+
+# ── Tool: describe an image ───────────────────────────────────
+@tool
+def analyze_image(image_path: str,
+                  question: str = "Describe this image in detail.") -> str:
+    """
+    Analyze an image using vision capabilities.
+
+    Args:
+        image_path: Local file path OR a public URL to the image.
+        question: What you want to know about the image.
+    Returns:
+        The model's analysis as a string.
+    """
+    from openai import OpenAI
+
+    client = OpenAI(
+        base_url="https://api.helmholtz-blablador.fz-juelich.de/v1",
+        api_key=os.getenv("Blablador_API_KEY"),
+    )
+
+    # Accept both URLs and local files
+    if image_path.startswith("http"):
+        image_content = {"url": image_path}
+    else:
+        image_content = {"url": encode_image(image_path)}
+
+    response = client.chat.completions.create(
+        model="02 - Qwen3.5-122B-A10B-FP8, general purpose large model",
+        messages=[{
+            "role":
+            "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": question
+                },
+                {
+                    "type": "image_url",
+                    "image_url": image_content
+                },
+            ],
+        }],
+        max_tokens=1024,
+        extra_body={"chat_template_kwargs": {
+            "thinking": False
+        }},
+    )
+    return response.choices[0].message.content
 
 if __name__ == "__main__":
     # Test Wikipedia article (should return clean plain-text extract)
