@@ -213,6 +213,14 @@ def run_and_submit_all(profile: gr.OAuthProfile | None,
         return status_message, results_df
 
 
+def export_to_csv(df):
+    if df is None or df.empty:
+        return None
+    csv_file = "evaluation_results.csv"
+    df.to_csv(csv_file, index=False)
+    return csv_file
+
+
 # --- Build Gradio Interface using Blocks ---
 with gr.Blocks() as demo:
     gr.Markdown("# Basic Agent Evaluation Runner")
@@ -246,9 +254,16 @@ with gr.Blocks() as demo:
     results_table = gr.DataFrame(label="Questions and Agent Answers",
                                  wrap=True)
 
+    download_button = gr.Button("Download Results as CSV")
+    csv_file = gr.File(label="Download CSV")
+
     run_button.click(fn=run_and_submit_all,
                      inputs=[test_mode_checkbox, specific_question_number],
                      outputs=[status_output, results_table])
+
+    download_button.click(fn=export_to_csv,
+                          inputs=[results_table],
+                          outputs=[csv_file])
 
 if __name__ == "__main__":
     print("\n" + "-" * 30 + " App Starting " + "-" * 30)
