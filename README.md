@@ -128,7 +128,7 @@ Through **Langfuse** telemetry, we identified that the agent was frequently bloc
 
 ![Wikipedia Error](pics/error_accessing_wiki.png)
 
-**The Fix**: We implemented a custom `visit_webpage` tool that detects Wikipedia links and redirects the request to **Wikipedia's REST API**. This provides clean, structured JSON content, completely bypassing the need for scraping and resolving the access issue.
+**The Fix**: We implemented a custom `visit_webpage` tool that detects Wikipedia links and redirects the request to **Wikipedia's REST API**. This provides clean, structured JSON content, completely bypassing the need for scraping and resolving the access issue. As a result, the execution time was reduced from 7min53s to 4min50s (38% reduction).
 
 ![Wikipedia Fix](pics/fix_accessing_wiki.png)
 
